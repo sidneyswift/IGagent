@@ -23,6 +23,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
+    - name: Create session file
+      run: |
+        echo '${{ secrets.INSTAGRAM_SESSION }}' > instagram_session.json
+    
     - name: Create .env file
       run: |
         echo "INSTAGRAM_USERNAME=${{ secrets.INSTAGRAM_USERNAME }}" >> .env
@@ -30,8 +34,37 @@ jobs:
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
     
     - name: Run Instagram poster
-      run: python instagram_poster.py
+      id: poster
+      run: |
+        python instagram_poster.py
+        echo "status=success" >> $GITHUB_OUTPUT
       env:
         INSTAGRAM_USERNAME: ${{ secrets.INSTAGRAM_USERNAME }}
         INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} 
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    
+    - name: Send Notification on Failure
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { repo, owner } = context.repo;
+          const run_link = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
+          const message = `⚠️ Instagram Auto Poster Failed!\n\nWorkflow: ${context.workflow}\nRun: ${run_link}\nTime: ${new Date().toISOString()}\n\nPlease check the workflow logs and you may need to refresh your Instagram session.`;
+          
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: '❌ Instagram Auto Poster Failed',
+            body: message,
+            labels: ['automation-error']
+          });
+    
+    - name: Send Success Notification
+      if: success()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { repo, owner } = context.repo;
+          const run_link = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
+          console.log(`✅ Instagram post successful! Check the run at ${run_link}`); 
