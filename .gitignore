@@ -36,7 +36,6 @@ env/
 
 # Instagram session
 instagram_session.json
-posted_images.txt
 
 # OS files
 .DS_Store
