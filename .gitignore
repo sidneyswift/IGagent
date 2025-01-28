@@ -24,6 +24,7 @@ wheels/
 .installed.cfg
 *.egg
 venv/
+ENV/
 
 # Instagram session
 instagram_session.json
@@ -36,4 +37,17 @@ posted_images.txt
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db 
+Thumbs.db
+
+# Virtual Environment
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log 
