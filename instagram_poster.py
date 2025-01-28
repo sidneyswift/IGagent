@@ -9,6 +9,7 @@ from instagrapi import Client
 from PIL import Image
 import tempfile
 import logging
+import time
 
 # Set up logging
 logging.basicConfig(
@@ -32,24 +33,151 @@ class InstagramPoster:
         # Create posted images file if it doesn't exist
         if not self.posted_images_file.exists():
             self.posted_images_file.touch()
+        
+        # Set consistent device settings
+        self._set_device_settings()
             
-        # Login to Instagram
-        self._perform_fresh_login()
+        # Try to load existing session first
+        if not self._load_session():
+            # If no session exists, perform fresh login
+            self._perform_fresh_login()
+            # Save the session for future use
+            self._save_session()
+
+    def _set_device_settings(self):
+        """Set consistent device settings to avoid suspicious activity flags."""
+        # Use consistent device settings
+        self.instagram.set_device({
+            "app_version": "269.0.0.18.75",
+            "android_version": 26,
+            "android_release": "8.0.0",
+            "dpi": "480dpi",
+            "resolution": "1080x1920",
+            "manufacturer": "Samsung",
+            "device": "SM-G973F",
+            "model": "Galaxy S10",
+            "cpu": "exynos",
+            "version_code": "314665256"
+        })
+        
+        # Set additional client settings
+        self.instagram.set_user_agent("Instagram 269.0.0.18.75 Android (26/8.0.0; 480dpi; 1080x1920; Samsung; SM-G973F; Galaxy S10; exynos; en_US; 314665256)")
+        self.instagram.set_country("US")
+        self.instagram.set_country_code(1)  # US country code
+        self.instagram.set_locale("en_US")
+        
+        # Set request timeout
+        self.instagram.request_timeout = 30
+        
+        # If running in GitHub Actions, use proxy if provided
+        if os.getenv('GITHUB_ACTIONS') == 'true' and os.getenv('PROXY_URL'):
+            proxy_url = os.getenv('PROXY_URL')
+            self.instagram.set_proxy(proxy_url)
+            logging.info("Running in GitHub Actions - Proxy configured")
+
+    def _load_session(self):
+        """Try to load existing session."""
+        try:
+            if self.session_file.exists():
+                logging.info("Loading existing session...")
+                settings = json.loads(self.session_file.read_text())
+                self.instagram.set_settings(settings)
+                
+                # Verify the session is still valid
+                try:
+                    self.instagram.get_timeline_feed()
+                    logging.info("Session loaded successfully!")
+                    return True
+                except Exception as e:
+                    logging.warning(f"Stored session is invalid: {str(e)}")
+                    return False
+        except Exception as e:
+            logging.warning(f"Error loading session: {str(e)}")
+            return False
+        return False
+
+    def _save_session(self):
+        """Save current session for future use."""
+        try:
+            logging.info("Saving session...")
+            settings = self.instagram.get_settings()
+            self.session_file.write_text(json.dumps(settings))
+            logging.info("Session saved successfully!")
+        except Exception as e:
+            logging.error(f"Error saving session: {str(e)}")
 
     def _perform_fresh_login(self):
         """Perform a fresh login."""
         try:
-            logging.info("Logging into Instagram...")
-            self.instagram.login(
-                os.getenv('INSTAGRAM_USERNAME'),
-                os.getenv('INSTAGRAM_PASSWORD')
-            )
+            logging.info("Attempting login...")
+            
+            # Small delay before login
+            time.sleep(2)
+            
+            username = os.getenv('INSTAGRAM_USERNAME')
+            password = os.getenv('INSTAGRAM_PASSWORD')
+            
+            print("\nAttempting to log in to Instagram...")
+            
+            # First try to login without 2FA
+            try:
+                # If running in GitHub Actions, use pre-saved session
+                if os.getenv('GITHUB_ACTIONS') == 'true':
+                    if os.getenv('INSTAGRAM_SESSION_DATA'):
+                        logging.info("Running in GitHub Actions - Using provided session data")
+                        session_data = json.loads(os.getenv('INSTAGRAM_SESSION_DATA'))
+                        self.instagram.set_settings(session_data)
+                        self.instagram.get_timeline_feed()  # Verify session
+                        print("Login successful using session data!")
+                        return
+                    else:
+                        raise Exception("No session data provided for GitHub Actions")
+                
+                # Normal login flow for local development
+                self.instagram.login(username, password)
+                print("Login successful!")
+            except Exception as e:
+                if any(phrase in str(e).lower() for phrase in ["two_factor", "2fa", "verification"]):
+                    print("\n" + "="*50)
+                    print("TWO FACTOR AUTHENTICATION REQUIRED")
+                    print("="*50)
+                    verification_code = input("Enter the 2FA code from your phone: ").strip()
+                    print("="*50)
+                    
+                    # Try login with 2FA
+                    self.instagram.login(username, password, verification_code=verification_code)
+                    print("2FA Login successful!")
+                    
+                    if os.getenv('SAVE_SESSION') == 'true':
+                        # Save session data for GitHub Actions
+                        settings = self.instagram.get_settings()
+                        print("\nCopy this session data to your GitHub repository secrets as INSTAGRAM_SESSION_DATA:")
+                        print("="*50)
+                        print(json.dumps(settings))
+                        print("="*50)
+                elif "challenge_required" in str(e).lower():
+                    print("\n" + "="*50)
+                    print("INSTAGRAM SECURITY CHECK REQUIRED")
+                    print("="*50)
+                    print("1. Please log in to Instagram through the app")
+                    print("2. Complete any security checks")
+                    print("3. Try running this script again")
+                    print("="*50 + "\n")
+                    raise
+                else:
+                    print(f"\nLogin failed: {str(e)}")
+                    raise
+            
+            # Verify the connection
+            self.instagram.get_timeline_feed()
             logging.info("Login successful!")
+            
+            # Save the session immediately after successful login
+            self._save_session()
+            print("Session saved - you won't need to enter 2FA next time!")
+            
         except Exception as e:
-            if "Two-factor authentication required" in str(e):
-                logging.error("2FA is enabled - this won't work in automated environment!")
-                raise
-            logging.error(f"Login failed: {e}")
+            logging.error(f"Login failed: {str(e)}")
             raise
 
     def get_posted_images(self):
@@ -76,39 +204,54 @@ class InstagramPoster:
             
         return random.choice(available_images)
 
-    def generate_caption(self, image_path):
-        """Generate a caption for the image."""
+    def convert_to_jpeg(self, image_path):
+        """Convert image to JPEG format."""
         try:
-            logging.info(f"Generating caption for: {image_path}")
-            
-            # Create a prompt describing the image
-            image_name = image_path.stem  # Get filename without extension
-            image_description = image_name.replace('_', ' ')  # Convert filename to readable text
-            
-            # API endpoint
+            logging.info(f"Converting {image_path} to JPEG...")
+            with Image.open(image_path) as img:
+                # Create a temporary file with .jpg extension
+                temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+                
+                # Convert to RGB if necessary and save as JPEG
+                if img.mode in ('RGBA', 'P'):
+                    img = img.convert('RGB')
+                
+                img.save(temp_file.name, 'JPEG')
+                logging.info(f"Image converted successfully: {temp_file.name}")
+                return temp_file.name
+                
+        except Exception as e:
+            logging.error(f"Error converting image: {e}")
+            raise
+
+    def generate_caption(self, image_path):
+        """Generate a caption for the image using GPT-4."""
+        try:
             url = "https://api.openai.com/v1/chat/completions"
-            
-            # Request headers
             headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"
+                "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
+                "Content-Type": "application/json"
             }
             
-            # Request data
+            # Extract the base filename without extension
+            image_name = Path(image_path).stem
+            # Replace underscores with spaces and remove any random strings
+            prompt = image_name.split('_')[:-1]  # Remove the last part which is usually random
+            prompt = ' '.join(prompt)
+            
             data = {
-                "model": "gpt-4o-mini",
+                "model": "gpt-4",
                 "messages": [
                     {
                         "role": "system",
-                        "content": "you write extremely deadpan, dry captions. think gen z nihilism meets ironic detachment. lowercase only. max 4 words. no hashtags. no punctuation. no enthusiasm."
+                        "content": "You are a creative Instagram caption writer. Write short, engaging captions that are casual and fun."
                     },
                     {
                         "role": "user",
-                        "content": f"write a deadpan caption for {image_description}. max 4 words. lowercase only. be ironic or detached. think exhausted vibes."
+                        "content": f"Write a short, fun caption for an Instagram post. The image is about: {prompt}"
                     }
                 ],
-                "temperature": 1.0,
-                "max_tokens": 10
+                "max_tokens": 100
             }
             
             response = requests.post(url, headers=headers, json=data)
@@ -121,32 +264,6 @@ class InstagramPoster:
         except Exception as e:
             logging.error(f"Error generating caption: {e}")
             return "whatever"
-
-    def convert_to_jpeg(self, image_path):
-        """Convert image to JPEG format with smart cropping."""
-        try:
-            logging.info(f"Converting {image_path} to JPEG...")
-            temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
-            temp_path = temp_file.name
-            temp_file.close()
-
-            with Image.open(image_path) as img:
-                # Convert to RGB if necessary
-                if img.mode in ('RGBA', 'LA'):
-                    background = Image.new('RGB', img.size, (255, 255, 255))
-                    background.paste(img, mask=img.split()[-1])
-                    img = background
-                elif img.mode != 'RGB':
-                    img = img.convert('RGB')
-                
-                # Save as JPEG
-                img.save(temp_path, 'JPEG', quality=95)
-            
-            logging.info(f"Image converted successfully: {temp_path}")
-            return temp_path
-        except Exception as e:
-            logging.error(f"Error converting image: {e}")
-            raise
 
     def post_image(self):
         """Post a single image to Instagram."""
