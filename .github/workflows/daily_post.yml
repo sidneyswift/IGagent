@@ -1,5 +1,6 @@
 name: Daily Instagram Post
 
+# Workflow for automated Instagram posting
 on:
   schedule:
     - cron: '0 12 * * *'  # Runs at 12:00 PM UTC daily
