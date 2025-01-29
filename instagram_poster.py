@@ -248,7 +248,7 @@ class InstagramPoster:
                     },
                     {
                         "role": "user",
-                        "content": f"Write a short, fun caption for an Instagram post. The image is about: {prompt}"
+                        "content": f"Write a short, fun, deadpan caption for an Instagram post. The image is about: {prompt}"
                     }
                 ],
                 "max_tokens": 100
