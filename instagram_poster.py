@@ -309,11 +309,26 @@ class InstagramPoster:
 def main():
     try:
         logging.info("Starting Instagram Auto Poster...")
+        
+        # Debug environment in GitHub Actions
+        if os.getenv('GITHUB_ACTIONS') == 'true':
+            logging.info("Running in GitHub Actions environment")
+            logging.info(f"Username: {os.getenv('INSTAGRAM_USERNAME')}")
+            logging.info("OpenAI API Key exists: " + str(bool(os.getenv('OPENAI_API_KEY'))))
+            logging.info("Session data exists: " + str(bool(os.getenv('INSTAGRAM_SESSION_DATA'))))
+            
+            # List available files
+            logging.info("Available files:")
+            for file in os.listdir('.'):
+                logging.info(f"- {file}")
+        
         poster = InstagramPoster()
         poster.post_image()
         logging.info("Posting complete!")
     except Exception as e:
-        logging.error(f"Fatal error: {e}")
+        logging.error(f"Fatal error: {str(e)}")
+        if os.getenv('GITHUB_ACTIONS') == 'true':
+            logging.error("Full error details:", exc_info=True)
         raise
 
 if __name__ == "__main__":

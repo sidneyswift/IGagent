@@ -14,7 +14,9 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
-      
+      with:
+        fetch-depth: 0  # Fetch all history for proper git operations
+        
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -25,21 +27,57 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
+    - name: Setup session data
+      run: |
+        echo "Setting up Instagram session data..."
+        echo '${{ secrets.INSTAGRAM_SESSION_DATA }}' > instagram_session.json
+        ls -la instagram_session.json
+        
+    - name: Setup environment
+      run: |
+        echo "INSTAGRAM_USERNAME=${{ secrets.INSTAGRAM_USERNAME }}" >> .env
+        echo "INSTAGRAM_PASSWORD=${{ secrets.INSTAGRAM_PASSWORD }}" >> .env
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+        echo "GITHUB_ACTIONS=true" >> .env
+        
+    - name: Debug environment
+      run: |
+        echo "Python version:"
+        python --version
+        echo "Workspace contents:"
+        ls -la
+        echo "Checking for required files:"
+        test -f instagram_session.json && echo "Session file exists" || echo "Session file missing"
+        test -f .env && echo "Env file exists" || echo "Env file missing"
+        test -f instagram_poster.py && echo "Script exists" || echo "Script missing"
+        
     - name: Post to Instagram
+      id: post
+      run: |
+        echo "Starting Instagram poster..."
+        python -u instagram_poster.py
       env:
         INSTAGRAM_USERNAME: ${{ secrets.INSTAGRAM_USERNAME }}
         INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
         INSTAGRAM_SESSION_DATA: ${{ secrets.INSTAGRAM_SESSION_DATA }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         GITHUB_ACTIONS: true
-      run: |
-        python instagram_poster.py
         
-    - name: Update repository with posted images
+    - name: Update repository
       if: success()
       run: |
         git config --global user.name 'GitHub Action'
         git config --global user.email 'action@github.com'
         git add posted_images.txt
-        git commit -m "Update posted images list" || echo "No changes to commit"
-        git push 
+        git commit -m "Update posted images list [skip ci]" || echo "No changes to commit"
+        git push
+        
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: debug-logs
+        path: |
+          *.log
+          instagram_session.json
+          .env 
